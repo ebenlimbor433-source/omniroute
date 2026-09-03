@@ -1134,6 +1134,7 @@ async function handleChatImplementation(
           providerId?: string | null;
           effectiveComboStrategy?: string | null;
           modelAbortSignal?: AbortSignal | null;
+          fallbackAttempts?: number;
         }
       ) =>
         handleSingleModelChat(
@@ -1171,6 +1172,7 @@ async function handleChatImplementation(
             reasoningRequestTags: requestRoutingTags.tags,
             managedLease,
             videoBridgeLog,
+            fallbackAttempts: target?.fallbackAttempts ?? 0,
             // #7360 follow-up: without this, a target dispatch abandoned by
             // targetTimeoutRunner.ts's per-target timeout (comboTargetTimeoutMs)
             // never learns it was abandoned — it only watches the ORIGINAL
@@ -1393,6 +1395,7 @@ async function handleSingleModelChat(
      * the signal used for the actual dispatch, not left unused.
      */
     modelAbortSignal?: AbortSignal | null;
+    fallbackAttempts?: number;
   } = {},
   comboStrategy: string | null = null,
   isCombo: boolean = false
@@ -1950,6 +1953,7 @@ async function handleSingleModelChat(
             reasoningTransportFallback: runtimeOptions.reasoningTransportFallback ?? "drop",
             managedLease: runtimeOptions.managedLease ?? null,
             videoBridgeLog: runtimeOptions.videoBridgeLog,
+            fallbackAttempts: runtimeOptions?.fallbackAttempts ?? 0,
           },
           runtimeOptions
         );
