@@ -182,3 +182,59 @@ test("foreign OAuth session softly redirects cache affinity while the same sessi
   release();
   _clearOAuthSessionOccupancyForTest();
 });
+
+test("derives a stable key from Anthropic system and tools payload", () => {
+  const messages = [
+    { role: "user", content: "Hello" },
+    { role: "assistant", content: "Hi there" },
+  ];
+  const payload = {
+    system: "You are a helpful assistant",
+    tools: [{ name: "search", description: "Search the web" }],
+    messages,
+  };
+
+  const resolution = resolvePromptCacheAffinityKey(payload);
+  assert.equal(resolution?.source, "prefix");
+  assert.ok(resolution?.fingerprint);
+
+  const payload2 = { ...payload };
+  const resolution2 = resolvePromptCacheAffinityKey(payload2);
+  assert.equal(resolution?.fingerprint, resolution2?.fingerprint);
+
+  // Messages-only Anthropic traffic has no reusable prefix; system/tools must
+  // be folded in so distinct system prompts do not collapse onto one account.
+  assert.equal(resolvePromptCacheAffinityKey({ messages }), null);
+  assert.notEqual(
+    resolvePromptCacheAffinityKey({ ...payload, system: "You are a different assistant" })
+      ?.fingerprint,
+    resolution?.fingerprint
+  );
+});
+
+test("handles circular references gracefully in content normalization", () => {
+  const circularObj: Record<string, unknown> = { role: "user" };
+  circularObj.self = circularObj;
+
+  const payload = {
+    messages: [{ role: "system", content: "system prompt" }, circularObj],
+  };
+
+  assert.doesNotThrow(() => {
+    const resolution = resolvePromptCacheAffinityKey(payload);
+    assert.equal(resolution?.source, "prefix");
+  });
+});
+
+test("fallback to body.input parses object items with role/content", () => {
+  const payload = {
+    input: [
+      { role: "system", content: "sys" },
+      { role: "user", content: "user text" },
+    ],
+  };
+
+  const resolution = resolvePromptCacheAffinityKey(payload);
+  assert.equal(resolution?.source, "prefix");
+  assert.ok(resolution?.fingerprint);
+});

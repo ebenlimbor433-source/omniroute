@@ -35,6 +35,8 @@ function asRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
+type NormalizedMessage = { role: string; content: string | unknown[] };
+
 function normalizeMessageContent(value: unknown): string | unknown[] {
   if (typeof value === "string" || Array.isArray(value)) return value;
   try {
@@ -44,38 +46,64 @@ function normalizeMessageContent(value: unknown): string | unknown[] {
   }
 }
 
-function normalizeResponsesInput(body: Record<string, unknown>): Array<{
-  role: string;
-  content: string | unknown[];
-}> | null {
-  if (Array.isArray(body.messages) && body.messages.length > 0) {
-    return body.messages
-      .map((item) => {
-        const record = asRecord(item);
-        return record && typeof record.role === "string"
-          ? { role: record.role, content: normalizeMessageContent(record.content) }
-          : null;
-      })
-      .filter((item): item is { role: string; content: string | unknown[] } => item !== null);
-  }
+function pushIfNonEmpty(result: NormalizedMessage[], role: string, value: unknown): void {
+  const content = normalizeMessageContent(value);
+  if (content.length > 0) result.push({ role, content });
+}
 
-  if (typeof body.input === "string" && body.input.length > 0) {
-    return [{ role: "user", content: body.input }];
+function pushAnthropicPrefix(result: NormalizedMessage[], body: Record<string, unknown>): void {
+  if (body.system !== undefined && body.system !== null) {
+    pushIfNonEmpty(result, "system", body.system);
   }
-
-  if (Array.isArray(body.input) && body.input.length > 0) {
-    return body.input
-      .map((item) => {
-        if (typeof item === "string") return { role: "user", content: item };
-        const record = asRecord(item);
-        return record && typeof record.role === "string"
-          ? { role: record.role, content: normalizeMessageContent(record.content) }
-          : null;
-      })
-      .filter((item): item is { role: string; content: string | unknown[] } => item !== null);
+  if (Array.isArray(body.tools) && body.tools.length > 0) {
+    pushIfNonEmpty(result, "tool", body.tools);
   }
+}
 
-  return null;
+function pushChatMessages(result: NormalizedMessage[], messages: unknown): boolean {
+  if (!Array.isArray(messages) || messages.length === 0) return false;
+  let pushed = false;
+  for (const item of messages) {
+    const record = asRecord(item);
+    if (record && typeof record.role === "string") {
+      result.push({ role: record.role, content: normalizeMessageContent(record.content) });
+      pushed = true;
+    }
+  }
+  return pushed;
+}
+
+function pushInputItem(result: NormalizedMessage[], item: unknown): void {
+  if (typeof item === "string") {
+    result.push({ role: "user", content: item });
+    return;
+  }
+  const record = asRecord(item);
+  if (!record) return;
+  const role = typeof record.role === "string" ? record.role : "user";
+  const content =
+    record.content !== undefined
+      ? normalizeMessageContent(record.content)
+      : normalizeMessageContent(record);
+  result.push({ role, content });
+}
+
+function pushResponsesInput(result: NormalizedMessage[], input: unknown): void {
+  if (typeof input === "string" && input.length > 0) {
+    result.push({ role: "user", content: input });
+    return;
+  }
+  if (!Array.isArray(input) || input.length === 0) return;
+  for (const item of input) pushInputItem(result, item);
+}
+
+function normalizeResponsesInput(body: Record<string, unknown>): NormalizedMessage[] | null {
+  const result: NormalizedMessage[] = [];
+  pushAnthropicPrefix(result, body);
+  if (!pushChatMessages(result, body.messages)) {
+    pushResponsesInput(result, body.input);
+  }
+  return result.length > 0 ? result : null;
 }
 
 function readExplicitPromptCacheKey(body: Record<string, unknown>): string | null {
